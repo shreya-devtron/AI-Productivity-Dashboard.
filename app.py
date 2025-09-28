@@ -20,9 +20,7 @@ db.create_table()
 # --- API Key and Model Configuration ---
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel('gemini-2.5-flash-preview')
-model = genai.GenerativeModel('gemini-2.5-flash-preview')
- # This line is now indented
+    model = genai.GenerativeModel('gemini-2.5-flash-preview') # This must be indented
 except Exception as e:
     st.error("Google API key not found...", icon="🚨")
     st.stop()
