@@ -6,7 +6,7 @@ import plotly.express as px
 import pandas as pd
 import re
 import json
-import database as db  # Import our new database helper
+import database as db
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -15,15 +15,16 @@ st.set_page_config(
 )
 
 # --- Database Initialization ---
-# This will create the database and table on the first run
 db.create_table()
 
 # --- API Key and Model Configuration ---
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash-preview')
+model = genai.GenerativeModel('gemini-2.5-flash-preview')
+ # This line is now indented
 except Exception as e:
-    st.error("Google API key not found. Please add it to your Streamlit secrets.", icon="🚨")
+    st.error("Google API key not found...", icon="🚨")
     st.stop()
 
 # --- Initialize Session State ---
@@ -31,6 +32,15 @@ if 'tasks' not in st.session_state:
     st.session_state.tasks = []
 if 'ai_summary' not in st.session_state:
     st.session_state.ai_summary = ""
+
+# --- Helper Function to Clean JSON (NEW) ---
+def clean_json_response(text):
+    """Cleans the AI's response to extract a valid JSON string."""
+    # Use regex to find the content between the first '{' and the last '}'
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        return match.group(0)
+    return None
 
 # --- Sidebar ---
 with st.sidebar:
@@ -42,11 +52,13 @@ with st.sidebar:
         if user_input:
             with st.spinner('Gemini is thinking...'):
                 try:
-                    # (Code for prompting the AI remains the same)
+                    # --- UPDATED PROMPT: Requesting JSON Output ---
                     prompt = f"""
-                    Analyze the text below. First, create a concise '## Summary'.
-                    Second, extract any clear tasks into a list under a '## Action Items' heading.
-                    Each action item must be on a new line and start with a hyphen (-).
+                    Analyze the text below. Return a single, valid JSON object with two keys:
+                    1. "summary": A concise summary of the key points.
+                    2. "action_items": A list of strings, where each string is a clear task or to-do item.
+
+                    Do not include any text or formatting outside of the JSON object.
 
                     Text to Analyze:
                     ---
@@ -54,28 +66,30 @@ with st.sidebar:
                     ---
                     """
                     response = model.generate_content(prompt)
-                    ai_response = response.text
-
-                    st.session_state.ai_summary = re.search(r"## Summary\n(.*?)(?=\n## Action Items|\Z)", ai_response, re.DOTALL).group(1).strip()
                     
-                    action_items_text = re.search(r"## Action Items\n(.*?)(?=\Z)", ai_response, re.DOTALL)
-                    if action_items_text:
-                        task_list = action_items_text.group(1).strip().split('\n')
-                        st.session_state.tasks = [{'task': task.strip('- '), 'done': False} for task in task_list if task.strip()]
+                    # --- UPDATED PARSING LOGIC: Using JSON ---
+                    cleaned_json_string = clean_json_response(response.text)
+                    if cleaned_json_string:
+                        ai_data = json.loads(cleaned_json_string)
+                        st.session_state.ai_summary = ai_data.get("summary", "No summary provided.")
+                        
+                        action_items_list = ai_data.get("action_items", [])
+                        st.session_state.tasks = [{'task': item, 'done': False} for item in action_items_list]
+                        
+                        # Save the results to the database
+                        db.insert_analysis(st.session_state.ai_summary, st.session_state.tasks)
+                        st.success("Analysis complete and saved to history!")
                     else:
-                        st.session_state.tasks = []
-                    
-                    # --- NEW: Save the results to the database ---
-                    db.insert_analysis(st.session_state.ai_summary, st.session_state.tasks)
-                    
-                    st.success("Analysis complete and saved to history!")
+                        st.error("The AI did not return a valid JSON response. Please try again.")
 
+                except json.JSONDecodeError:
+                    st.error("Failed to decode the AI's response. The format was invalid.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}", icon="🚨")
         else:
             st.warning("Please enter some text to analyze.", icon="⚠️")
 
-    # --- NEW: Display Analysis History in Sidebar ---
+    # --- Analysis History Display (No changes here) ---
     st.markdown("---")
     st.title("📖 Analysis History")
     history = db.get_all_analyses()
@@ -84,7 +98,6 @@ with st.sidebar:
         st.info("No past analyses found.")
     else:
         for record in history:
-            # Format the timestamp to be more readable
             timestamp = pd.to_datetime(record['created_at']).strftime('%Y-%m-%d %H:%M')
             with st.expander(f"Analysis from {timestamp}"):
                 st.write("**Summary:**")
@@ -94,13 +107,12 @@ with st.sidebar:
                 for task in tasks_from_db:
                     st.write(f"- {task['task']}")
 
-# --- Main Dashboard Area ---
+# --- Main Dashboard Area (No changes here) ---
 st.title("🤖 Productivity Copilot Dashboard")
 
 if not st.session_state.tasks and not st.session_state.ai_summary:
     st.info("Enter some text in the sidebar and click 'Analyze Text' to get started.")
 else:
-    # (The rest of the main dashboard code remains the same)
     summary_col, dashboard_col = st.columns(2)
 
     with summary_col:
